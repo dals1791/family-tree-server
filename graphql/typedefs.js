@@ -2,18 +2,23 @@ export const typeDefs = `
     type Family {
         id: ID! @id @unique
         name: String!
-        members: [FamilyMember!]! @relationship(type: "HAS_MEMBER", direction: OUT)
+        members: [FamilyMember!]! @relationship(type: "BELONGS_TO", direction: IN)
     }
    
     type FamilyMember {
         id: ID! @id @unique
         firstName: String!
         lastName: String!
+        birthDate: Date
+        birthYear: Int
+        deathDate: Date
+        gender: Gender
 
-        children: [FamilyMember!]! @relationship(type: "HAS_CHILD", direction: OUT)
-        parents: [FamilyMember!]! @relationship(type: "HAS_CHILD", direction: IN)
+
+        children: [FamilyMember!]! @relationship(type: "HAS_CHILD", direction: IN)
+        parents: [FamilyMember!]! @relationship(type: "HAS_CHILD", direction: OUT)
         partners: [Partnership!]! @relationship(type: "IN_PARTNERSHIP", direction: OUT)
-        families: [Family!]! @relationship(type: "HAS_MEMBER", direction: IN)
+        families: [Family!]! @relationship(type: "BELONGS_TO", direction: OUT)
     }
 
     type Partnership {
@@ -34,7 +39,6 @@ export const typeDefs = `
     enum RelationshipType {
         MARRIAGE
         DOMESTIC_PARTNERSHIP
-        DATING
         DIVORCED
         SEPARATED
     }
