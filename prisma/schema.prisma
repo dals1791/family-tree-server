@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Profile {
+  id        String             @id
+  email     String             @unique
+  createdAt DateTime           @default(now())
+  trees     FamilyTreeAccess[]
+}
+
+model FamilyTree {
+  id          String             @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  access      FamilyTreeAccess[]
+  invitations Invitation[]
+}
+
+model FamilyTreeAccess {
+  id        String     @id @default(uuid())
+  userId    String
+  treeId    String
+  role      AccessRole
+  createdAt DateTime   @default(now())
+  user      Profile    @relation(fields: [userId], references: [id])
+  tree      FamilyTree @relation(fields: [treeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, treeId])
+}
+
+model Invitation {
+  id        String           @id @default(uuid())
+  treeId    String
+  email     String
+  role      AccessRole
+  token     String           @unique @default(uuid())
+  memberId  String?
+  status    InvitationStatus @default(PENDING)
+  createdAt DateTime         @default(now())
+  tree      FamilyTree       @relation(fields: [treeId], references: [id], onDelete: Cascade)
+}
+
+enum AccessRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
