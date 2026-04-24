@@ -10,6 +10,7 @@ import relationshipsRouter from './routes/relationships.js';
 import invitationsRouter from './routes/invitations.js';
 import claimsRouter from './routes/claims.js';
 import traversalRouter from './routes/traversal.js';
+import { applyConstraints } from './db/neo4j/constraints.js';
 import type { AccessRole } from './types/tree.js';
 
 type Variables = { userId: string; userRole: AccessRole };
@@ -44,3 +45,5 @@ app.onError(errorHandler);
 serve({ fetch: app.fetch, port: PORT }, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+
+applyConstraints().catch((err) => console.error('Failed to apply Neo4j constraints:', err.message));
