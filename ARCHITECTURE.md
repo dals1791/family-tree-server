@@ -80,6 +80,7 @@ Profile              — extends Supabase auth.users (1:1, created via trigger)
 FamilyTree           — tree metadata (name, description, ownerId)
 FamilyTreeAccess     — join table: userId + treeId + role
 Invitation           — pending invites with token, email, optional memberId
+JoinRequest          — user-initiated request to join a tree, optional memberId to claim (planned — see Invitation & Claim Flow)
 ```
 
 The `Profile` row is created automatically by a Supabase database trigger
@@ -178,6 +179,7 @@ family-tree-server/
 │   │   ├── members.ts            # /api/trees/:treeId/members
 │   │   ├── relationships.ts      # /api/trees/:treeId/relationships
 │   │   ├── invitations.ts        # /api/trees/:treeId/invitations + /api/invitations/accept
+│   │   ├── join-requests.ts      # /api/trees/:treeId/join-requests (planned)
 │   │   ├── claims.ts             # /api/trees/:treeId/claims
 │   │   └── traversal.ts          # /api/trees/:treeId/graph/:anchorId
 │   ├── services/                 # All business logic — only layer that touches DB
@@ -185,6 +187,7 @@ family-tree-server/
 │   │   ├── memberService.ts      # Neo4j: member node CRUD
 │   │   ├── relationshipService.ts# Neo4j: CHILD_OF edges, Partnership nodes
 │   │   ├── invitationService.ts  # Postgres: invite lifecycle, token generation
+│   │   ├── joinRequestService.ts # Postgres: request lifecycle, approve → access + claim (planned)
 │   │   ├── claimService.ts       # Neo4j: link userId to member node
 │   │   └── traversalService.ts   # Neo4j: neighborhood traversal query
 │   ├── db/
@@ -239,11 +242,17 @@ POST   /api/trees/:treeId/relationships/partnerships              — add (EDITO
 PATCH  /api/trees/:treeId/relationships/partnerships/:id          — update (EDITOR)
 DELETE /api/trees/:treeId/relationships/partnerships/:id          — remove (EDITOR)
 
-# Invitations
+# Invitations (push — owner picks the person)
 GET    /api/trees/:treeId/invitations                — list invites (OWNER)
 POST   /api/trees/:treeId/invitations                — send invite (OWNER)
 DELETE /api/trees/:treeId/invitations/:id            — revoke invite (OWNER)
 POST   /api/invitations/accept                       — accept by token (any authed user)
+
+# Join Requests (pull — user asks, owner approves) — planned, not yet built
+GET    /api/trees/:treeId/join-requests               — list pending requests (OWNER)
+POST   /api/trees/:treeId/join-requests               — request access, optional memberId (any authed user)
+POST   /api/trees/:treeId/join-requests/:id/approve   — approve → grants VIEWER (+ claim if memberId set) (OWNER)
+POST   /api/trees/:treeId/join-requests/:id/deny      — deny (OWNER)
 
 # Claims
 GET    /api/trees/:treeId/claims/me                  — my claimed member (VIEWER)
@@ -300,7 +309,10 @@ The graph animates to the new center rather than doing a hard cut.
 
 ## Invitation & Claim Flow
 
-**Inviting someone:**
+Two ways to get `FamilyTreeAccess` on a tree: an OWNER invites you (push), or
+you request to join and an OWNER approves (pull). Both can end in a claim.
+
+**Inviting someone (push, owner-initiated):**
 1. OWNER calls `POST /api/trees/:treeId/invitations` with email, role, optional memberId
 2. Server generates a secure random token, stores invitation in Postgres
 3. In development: token is returned in response for manual testing
@@ -308,6 +320,34 @@ The graph animates to the new center rather than doing a hard cut.
 5. The invited person clicks the link, authenticates, hits `POST /api/invitations/accept`
 6. Server grants `FamilyTreeAccess`, marks invitation ACCEPTED
 7. If `memberId` was set on the invitation, client prompts the user to claim that member
+
+Invites can grant any role (OWNER, EDITOR, or VIEWER) — the owner is
+proactively extending trust, so there's no ceiling.
+
+**Requesting to join (pull, user-initiated — planned, not yet built):**
+1. An already-authenticated user calls `POST /api/trees/:treeId/join-requests`,
+   optionally with a `memberId` if they want to request claiming that specific
+   person as themselves; omit it to request general viewing access only
+2. Server stores a `JoinRequest` (PENDING) — rejects a second PENDING request
+   from the same user on the same tree
+3. OWNER sees pending requests (`GET /api/trees/:treeId/join-requests`) and
+   approves or denies each one
+4. On approval: grants `FamilyTreeAccess` with role VIEWER, and if a
+   `memberId` was requested, performs the claim in the same step (re-checking
+   the member is still UNCLAIMED — first-come-first-served still applies; a
+   request targeting an already-claimed member should surface to the owner
+   as "no longer available" rather than being silently approved)
+5. On denial: `JoinRequest.status = DENIED`. The user may submit a new
+   request later.
+
+Join requests are **VIEWER-only** — self-serve access never grants EDITOR or
+OWNER. Escalating someone past VIEWER always requires an explicit invite from
+an OWNER.
+
+Discovery is intentionally out of scope for now: a user needs *some* existing
+channel (a shared link, a code, knowing the treeId) to know a tree exists and
+request to join it. Trees are not publicly searchable — family data is
+sensitive by default.
 
 **Claiming a member:**
 1. User calls `POST /api/trees/:treeId/claims` with a memberId
@@ -321,22 +361,60 @@ a Resend or SendGrid call after invitation creation. This is the next piece to a
 
 ---
 
+## Future: Cross-Tree Linking (Deferred — Not MVP)
+
+Trees are fully isolated for now — every Member node belongs to exactly one
+`treeId`, and every relationship stays within that tree. This is intentional:
+it keeps access control a single `FamilyTreeAccess` check per request, and
+matches the MVP goal of single-owner trees. Multiple houses (e.g. Baratheon,
+Lannister, Stark, Targaryen) can and do coexist as one shared `treeId` today —
+"houses" are a navigational convention (anchor-scoped traversal always
+expands the clicked member's own ancestry, never a partner's, so clicking
+across a marriage naturally feels like switching families) rather than a real
+ownership boundary. See `family-tree-server/src/db/neo4j/seed-*.ts` for how
+seed data is organized per house despite living in one tree.
+
+**The eventual model**, once separate house-owned trees are real (e.g. an
+account that owns a Stark-only tree, a different account owning a
+Lannister-only tree): a `PARTNERED_WITH` (or `CHILD_OF`) edge should be able
+to cross a `treeId` boundary, so a marriage between two independently-owned
+trees renders as one real connection instead of duplicated data.
+
+Key open problems to solve before building this:
+- **Traversal must stop at the boundary.** Crossing into a linked tree should
+  reveal only the directly-connected member as a stub (name, years, the
+  relationship), never expand into their tree's ancestors/descendants without
+  separate access to that tree.
+- **Access control spans two `FamilyTreeAccess` checks, not one.** A viewer
+  of Tree A peeking at a linked stub in Tree B needs a defined, minimal grant
+  — not full VIEWER access to Tree B.
+- **No data duplication.** The linked member must be the same Neo4j node
+  referenced from both trees' traversal results, not a copy kept in sync by
+  hand.
+
+Rejected alternative: giving every house its own tree with duplicated stub
+copies of in-laws, manually kept in sync. Simpler short-term, but two sources
+of truth for the same person is a correctness trap.
+
+---
+
 ## MVP Scope (Current)
 
 What is built:
 - Fully isolated trees (no cross-tree linking)
-- Invite people with OWNER / EDITOR / VIEWER roles
-- Claim a member node within a tree
 - Full CRUD for members and relationships
 - Neighborhood traversal query
+- Graph visualization (client, React Flow — anchor-scoped, click-to-recenter)
+- Member list with search-by-scroll (client, scoped to whatever's currently in view)
 
 What is explicitly NOT built yet (planned for later):
-- Cross-tree references and linked nodes
-- Email delivery (token returned in dev mode only)
+- Invitations (push) — routes exist, currently a 501 stub, no service layer
+- Join requests (pull) — designed above, no route/service/schema yet
+- Claims — routes exist, currently a 501 stub, no service layer
+- Cross-tree references and linked nodes (design sketch above)
+- Email delivery (token returned in dev mode only, once invitations exist)
 - Stripe payments / subscription gating
-- Graph visualization (client work)
 - Real-time updates
-- Member search across a tree
 
 ---
 

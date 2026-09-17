@@ -27,7 +27,12 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed:neo4j": "tsx src/db/neo4j/seed.ts",
-    "seed:neo4j:extended": "tsx src/db/neo4j/seed-extended.ts"
+    "seed:neo4j:extended": "tsx src/db/neo4j/seed-extended.ts",
+    "seed:lannister": "tsx src/db/neo4j/seed-lannister.ts",
+    "seed:stark": "tsx src/db/neo4j/seed-stark.ts",
+    "seed:targaryen": "tsx src/db/neo4j/seed-targaryen.ts",
+    "seed:crosslinks": "tsx src/db/neo4j/seed-crosslinks.ts",
+    "seed:all-houses": "npm run seed:lannister && npm run seed:stark && npm run seed:targaryen && npm run seed:crosslinks"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
