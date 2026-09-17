@@ -19,6 +19,8 @@ export interface FamilyGraphPayload {
   members: Member[];
   parentEdges: ParentEdge[];
   partnershipEdges: PartnershipEdge[];
+  /** Ids of members who have children in the tree beyond what's visible in this payload. */
+  membersWithHiddenChildren: string[];
 }
 
 export interface NormalizedFamilyGraph {

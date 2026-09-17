@@ -3,6 +3,13 @@ import { NotFoundError } from '../lib/errors.js';
 import { nodeToMember } from './memberService.js';
 import type { FamilyGraphPayload, ParentEdge, PartnershipEdge } from '../types/graph.js';
 
+// neo4j integers can come back as Integer objects or plain numbers depending on the driver
+function neo4jIntToNumber(val: any): number {
+  if (typeof val === 'number') return val;
+  if (val != null && typeof val.toNumber === 'function') return val.toNumber();
+  return Number(val);
+}
+
 /**
  * Returns a flat FamilyGraphPayload centered on anchorId.
  *
@@ -143,11 +150,31 @@ export async function getGraph(treeId: string, anchorId: string): Promise<Family
       parentId: r.get('parentId') as string,
     }));
 
+    // 10. Flag members who have children in the tree beyond what's visible here
+    const totalChildrenResult = await session.run(
+      `UNWIND $memberIds as pid
+       MATCH (child:Member {treeId: $treeId})-[:CHILD_OF]->(m:Member {id: pid, treeId: $treeId})
+       RETURN pid, count(child) as totalChildren`,
+      { memberIds: allMemberIds, treeId },
+    );
+    const visibleChildCount = new Map<string, number>();
+    for (const e of parentEdges) {
+      visibleChildCount.set(e.parentId, (visibleChildCount.get(e.parentId) ?? 0) + 1);
+    }
+    const membersWithHiddenChildren = totalChildrenResult.records
+      .filter((r) => {
+        const pid = r.get('pid') as string;
+        const total = neo4jIntToNumber(r.get('totalChildren'));
+        return total > (visibleChildCount.get(pid) ?? 0);
+      })
+      .map((r) => r.get('pid') as string);
+
     return {
       anchorId,
       members: Array.from(memberMap.values()).map(nodeToMember),
       parentEdges,
       partnershipEdges: Array.from(partnershipMap.values()),
+      membersWithHiddenChildren,
     };
   } finally {
     await session.close();
