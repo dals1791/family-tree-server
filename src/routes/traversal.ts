@@ -7,6 +7,14 @@ type Variables = { userId: string; userRole: AccessRole };
 
 const router = new Hono<{ Variables: Variables }>();
 
+// GET /api/trees/:treeId/graph/default-anchor
+// Registered before /:anchorId so the literal segment takes priority.
+router.get('/default-anchor', requireRole('VIEWER'), async (c) => {
+  const treeId = c.req.param('treeId')!;
+  const anchorId = await traversalService.getMostConnectedMemberId(treeId);
+  return c.json({ anchorId });
+});
+
 // GET /api/trees/:treeId/graph/:anchorId
 router.get('/:anchorId', requireRole('VIEWER'), async (c) => {
   const treeId = c.req.param('treeId')!;

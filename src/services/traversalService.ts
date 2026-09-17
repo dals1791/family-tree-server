@@ -180,3 +180,29 @@ export async function getGraph(treeId: string, anchorId: string): Promise<Family
     await session.close();
   }
 }
+
+/**
+ * Picks a sensible default member to open a tree on — whoever has the most
+ * relationships (parents + children + partners) — so a fresh page load lands
+ * on the main family rather than on an isolated, untethered member who
+ * happens to sort first alphabetically.
+ */
+export async function getMostConnectedMemberId(treeId: string): Promise<string | null> {
+  const session = driver.session({ defaultAccessMode: 'READ' });
+  try {
+    const result = await session.run(
+      `MATCH (m:Member {treeId: $treeId})
+       OPTIONAL MATCH (m)-[:CHILD_OF]->(parent:Member {treeId: $treeId})
+       OPTIONAL MATCH (child:Member {treeId: $treeId})-[:CHILD_OF]->(m)
+       OPTIONAL MATCH (m)-[:PARTNERED_WITH]->(:Partnership)<-[:PARTNERED_WITH]-(partner:Member {treeId: $treeId})
+       RETURN m.id as id, count(DISTINCT parent) + count(DISTINCT child) + count(DISTINCT partner) as degree
+       ORDER BY degree DESC, m.id ASC
+       LIMIT 1`,
+      { treeId },
+    );
+    if (result.records.length === 0) return null;
+    return result.records[0].get('id') as string;
+  } finally {
+    await session.close();
+  }
+}

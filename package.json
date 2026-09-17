@@ -26,7 +26,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "seed:neo4j": "tsx src/db/neo4j/seed.ts"
+    "seed:neo4j": "tsx src/db/neo4j/seed.ts",
+    "seed:neo4j:extended": "tsx src/db/neo4j/seed-extended.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
